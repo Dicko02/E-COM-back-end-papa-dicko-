@@ -23,46 +23,46 @@ const {
   getStatusBreakdown
 } = require("../controllers/order.controller");
 
-// Routes pour les commandes
+// ── Routes fixes (doivent être AVANT les routes dynamiques /:id) ──────────────
 
 // Affichage de toutes les commandes (admin uniquement)
 router.get("/viewAllOrder", requireAuth, requireAdmin, viewAllOrder);
 
-// Route pour récupérer toutes les commandes (admin uniquement)
+// Toutes les commandes (admin uniquement)
 router.get('/all', requireAuth, requireAdmin, getAllOrders);
 
-// Route pour créer une nouvelle commande
-router.post('/create', createOrder);
-
-// Route pour créer une commande avec panier complet
-router.post('/cart/create', createCartOrder);
-
-// Route pour les statistiques des commandes (admin uniquement)
-router.get('/stats/overview', requireAuth, requireAdmin, getOrderStats);
-
-// Route pour récupérer les commandes d'un utilisateur (vérification propriétaire dans le controller)
+// Commandes d'un utilisateur
 router.get('/user/:email', requireAuth, getUserOrders);
 
-// Route pour récupérer une commande spécifique (vérification propriétaire dans le controller)
-router.get('/:orderId', requireAuth, getOrderById);
-
-// Route pour mettre à jour le statut d'une commande (admin uniquement)
-router.put('/:orderId/status', requireAuth, requireAdmin, updateOrderStatus);
-
-// Route pour annuler une commande (vérification propriétaire dans le controller)
-router.put('/:orderId/cancel', requireAuth, cancelOrder);
-
-// Suppression d'une commande (admin uniquement)
-router.delete("/deleteOneOrder/:id", requireAuth, requireAdmin, deleteOneOrder);
-
-// Mise à jour d'une commande (admin uniquement)
-router.put("/updateOneOrder/:id", requireAuth, requireAdmin, updateOneOrder);
-
-// 📊 ROUTES POUR LES STATISTIQUES (Admin seulement)
+// 📊 STATISTIQUES — toutes AVANT /:orderId pour éviter les conflits de routing
+router.get('/stats/overview',        requireAuth, requireAdmin, getOrderStats);
 router.get('/stats/monthly-revenue', requireAuth, requireAdmin, getMonthlyRevenue);
 router.get('/stats/customer-trends', requireAuth, requireAdmin, getCustomerTrends);
-router.get('/stats/category-stats', requireAuth, requireAdmin, getCategoryStats);
-router.get('/stats/top-products', requireAuth, requireAdmin, getTopProducts);
-router.get('/stats/status-breakdown', requireAuth, requireAdmin, getStatusBreakdown);
+router.get('/stats/category-stats',  requireAuth, requireAdmin, getCategoryStats);
+router.get('/stats/top-products',    requireAuth, requireAdmin, getTopProducts);
+router.get('/stats/status-breakdown',requireAuth, requireAdmin, getStatusBreakdown);
+
+// ── Routes dynamiques (après les routes fixes) ────────────────────────────────
+
+// Créer une commande
+router.post('/create', createOrder);
+
+// Créer une commande depuis le panier
+router.post('/cart/create', createCartOrder);
+
+// Commande spécifique par ID — DOIT être après toutes les routes /stats/*
+router.get('/:orderId', requireAuth, getOrderById);
+
+// Mettre à jour le statut
+router.put('/:orderId/status', requireAuth, requireAdmin, updateOrderStatus);
+
+// Annuler une commande
+router.put('/:orderId/cancel', requireAuth, cancelOrder);
+
+// Suppression (admin)
+router.delete("/deleteOneOrder/:id", requireAuth, requireAdmin, deleteOneOrder);
+
+// Mise à jour (admin)
+router.put("/updateOneOrder/:id", requireAuth, requireAdmin, updateOneOrder);
 
 module.exports = router;
