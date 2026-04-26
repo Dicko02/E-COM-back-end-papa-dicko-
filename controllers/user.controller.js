@@ -46,13 +46,18 @@ module.exports.signUp = async (req, res) => {
 
     await User.findByIdAndUpdate(user._id, { code, codeExpires });
 
-    // Envoi email
-    await mail(
-      user.email,
-      "Confirmation",
-      `Votre code est ${code}`,
-      `<p>Votre code est <strong>${code}</strong></p>`
-    );
+    // Envoi email (non-bloquant — l'inscription réussit même si l'email échoue)
+    try {
+      await mail(
+        user.email,
+        "Confirmation",
+        `Votre code est ${code}`,
+        `<p>Votre code est <strong>${code}</strong></p>`
+      );
+    } catch (mailErr) {
+      console.error("Erreur envoi email:", mailErr.message);
+      // On continue quand même — l'utilisateur pourra demander un renvoi
+    }
 
     res.status(200).json({ message: "Utilisateur créé. Code envoyé par email." });
 
