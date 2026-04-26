@@ -28,7 +28,10 @@ const createToken = (id, role) => {
 // Enregistrement utilisateur
 module.exports.signUp = async (req, res) => {
   try {
-    const user = await User.create(req.body);
+    // Nettoyer les champs qui ne doivent pas venir du client
+    const { code: _code, codeExpires: _exp, ...safeBody } = req.body;
+
+    const user = await User.create(safeBody);
 
     // Génération du code de vérification
     const generateNumericCode = (length) => {
@@ -50,18 +53,35 @@ module.exports.signUp = async (req, res) => {
     try {
       await mail(
         user.email,
-        "Confirmation",
-        `Votre code est ${code}`,
-        `<p>Votre code est <strong>${code}</strong></p>`
+        "Confirmation Wayne Enterprize",
+        `Votre code de vérification est : ${code}`,
+        `<p>Bonjour ${user.prenom || ''},</p><p>Votre code de vérification est : <strong style="font-size:24px">${code}</strong></p><p>Ce code expire dans 10 minutes.</p>`
       );
     } catch (mailErr) {
       console.error("Erreur envoi email:", mailErr.message);
-      // On continue quand même — l'utilisateur pourra demander un renvoi
+      // Non-bloquant — l'inscription continue même sans email
     }
 
     res.status(200).json({ message: "Utilisateur créé. Code envoyé par email." });
 
   } catch (err) {
+    console.error("Erreur inscription:", err.message, err.code);
+
+    // Email déjà utilisé
+    if (err.code === 11000 && err.keyValue?.email) {
+      return res.status(400).json({ errors: "Cet email est déjà enregistré" });
+    }
+
+    // Mot de passe trop court
+    if (err.message?.includes('password')) {
+      return res.status(400).json({ errors: "Le mot de passe doit faire 6 caractères minimum" });
+    }
+
+    // Email invalide
+    if (err.message?.includes('email')) {
+      return res.status(400).json({ errors: "Adresse email invalide" });
+    }
+
     const errors = signUpErrors(err);
     res.status(400).json({ errors });
   }
