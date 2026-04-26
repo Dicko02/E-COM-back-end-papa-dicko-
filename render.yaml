@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: wayne-enterprize-api
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node index.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: MONGO_URI
+        sync: false   # À renseigner manuellement dans le dashboard Render
+      - key: TOKEN_SECRET
+        sync: false   # À renseigner manuellement dans le dashboard Render
+      - key: ORIGIN
+        sync: false   # URL Vercel — à renseigner après déploiement front-end
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      - key: SMTP_FROM_NAME
+        value: Wayne Enterprize
