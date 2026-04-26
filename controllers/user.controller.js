@@ -65,7 +65,7 @@ module.exports.signUp = async (req, res) => {
     res.status(200).json({ message: "Utilisateur créé. Code envoyé par email." });
 
   } catch (err) {
-    console.error("Erreur inscription:", err.message, err.code);
+    console.error("Erreur inscription:", err.message, "| code:", err.code, "| keyValue:", JSON.stringify(err.keyValue));
 
     // Email déjà utilisé
     if (err.code === 11000 && err.keyValue?.email) {
@@ -83,7 +83,7 @@ module.exports.signUp = async (req, res) => {
     }
 
     const errors = signUpErrors(err);
-    res.status(400).json({ errors });
+    res.status(400).json({ errors, debug: err.message });
   }
 };
 

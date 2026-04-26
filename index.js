@@ -61,14 +61,31 @@ app.use(express.json());
 
 /* CORS */
 app.use(cors({
-  origin: [
-    'http://localhost:5173',
-    'http://localhost:5174', // Ajoutez d'autres origines autorisées si nécessaire
-    process.env.ORIGIN
-  ], // Remplace par l'URL de mon frontend en temp voulu
+  origin: (origin, callback) => {
+    // Autoriser les requêtes sans origin (Postman, mobile, etc.)
+    if (!origin) return callback(null, true);
+
+    const allowed = [
+      'http://localhost:5173',
+      'http://localhost:5174',
+      process.env.ORIGIN, // URL Vercel principale
+    ].filter(Boolean);
+
+    // Autoriser tous les sous-domaines Vercel (previews de déploiement)
+    const isVercelPreview = origin.endsWith('.vercel.app');
+    // Autoriser aussi Render lui-même
+    const isRender = origin.endsWith('.onrender.com');
+
+    if (allowed.includes(origin) || isVercelPreview || isRender) {
+      callback(null, true);
+    } else {
+      console.warn('CORS bloqué pour origin:', origin);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   methods: ['GET','POST','PUT','DELETE','OPTIONS'],
   allowedHeaders: ['Content-Type','Authorization'],
-  credentials: true, 
+  credentials: true,
 }));
 
 // Middleware pour parser les cookies et le corps des requêtes
