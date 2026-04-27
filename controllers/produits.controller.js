@@ -249,7 +249,18 @@ module.exports.addProduct = async (req, res) => {
     // Peupler la catégorie pour la réponse
     await savedProduit.populate('categorie');
     
-    res.status(201).json(savedProduit);
+    // Ajouter l'URL complète pour l'image (comme dans getAllProduct)
+    const produitObj = savedProduit.toObject();
+    if (produitObj.image) {
+      produitObj.imageUrl = `${req.protocol}://${req.get('host')}/uploads/${produitObj.image}`;
+    }
+    if (produitObj.images && produitObj.images.length > 0) {
+      produitObj.imageUrls = produitObj.images.map(img => 
+        `${req.protocol}://${req.get('host')}/uploads/${img}`
+      );
+    }
+    
+    res.status(201).json(produitObj);
   } catch (err) {
     console.error("Erreur lors de l'ajout du produit :", err);
     res.status(500).json({ error: "Erreur serveur, impossible d'ajouter le produit" });
@@ -290,7 +301,18 @@ module.exports.updatedProduct = async (req, res) => {
       { new: true, runValidators: true }
     ).populate('categorie');
 
-    res.status(200).json(updatedProduit);
+    // Ajouter l'URL complète pour l'image (comme dans getAllProduct)
+    const produitObj = updatedProduit.toObject();
+    if (produitObj.image) {
+      produitObj.imageUrl = `${req.protocol}://${req.get('host')}/uploads/${produitObj.image}`;
+    }
+    if (produitObj.images && produitObj.images.length > 0) {
+      produitObj.imageUrls = produitObj.images.map(img => 
+        `${req.protocol}://${req.get('host')}/uploads/${img}`
+      );
+    }
+
+    res.status(200).json(produitObj);
   } catch (err) {
     console.error("Erreur lors de la mise à jour :", err);
     res.status(500).json({ error: "Erreur serveur, mise à jour impossible" });
