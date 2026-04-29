@@ -5,6 +5,32 @@ const ObjectID = require("mongoose").Types.ObjectId;
 const { deleteFile } = require("../middleware/upload");
 
 
+const getImageUrl = (image, req) => {
+  if (!image) return null;
+  // Si c'est Cloudinary (URL complète ou dossier spécifique)
+  if (image.startsWith('http') || image.includes('wayne-enterprize')) {
+    return image; 
+  }
+  // Sinon, c'est du stockage local
+  return `${req.protocol}://${req.get('host')}/uploads/${image}`;
+};
+
+const addImageUrls = (produit, req) => {
+  // On transforme le document Mongoose en objet JS simple
+  const produitObj = produit.toObject ? produit.toObject() : produit;
+  
+  if (produitObj.image) {
+    produitObj.imageUrl = getImageUrl(produitObj.image, req);
+  }
+  
+  if (produitObj.images && produitObj.images.length > 0) {
+    produitObj.imageUrls = produitObj.images.map(img => getImageUrl(img, req));
+  }
+  
+  return produitObj;
+};
+
+
 // Fonction pour la récupération de tous les produits
 module.exports.getAllProduct = async (req, res) => {
   try {
@@ -12,16 +38,7 @@ module.exports.getAllProduct = async (req, res) => {
     
     // Ajouter l'URL complète pour les images
     const produitsWithImages = produits.map(produit => {
-      const produitObj = produit.toObject();
-      if (produitObj.image) {
-        produitObj.imageUrl = `${req.protocol}://${req.get('host')}/uploads/${produitObj.image}`;
-      }
-      if (produitObj.images && produitObj.images.length > 0) {
-        produitObj.imageUrls = produitObj.images.map(img => 
-          `${req.protocol}://${req.get('host')}/uploads/${img}`
-        );
-      }
-      return produitObj;
+      return addImageUrls(produit.toObject(), req);
     });
     
     res.status(200).json(produitsWithImages);
@@ -217,16 +234,12 @@ module.exports.getProductById = async (req, res) => {
 // Fonction pour l'ajout d'un produit
 module.exports.addProduct = async (req, res) => {
   try {
-    if (
-      !req.body.nom ||
-      !req.body.description ||
-      !req.body.categorie ||
-      !req.body.prix ||
-      !req.body.nombreDisponible
-    ) {
+    // validations
+    if (!req.body.nom || !req.body.description || !req.body.categorie || !req.body.prix || !req.body.nombreDisponible) {
       return res.status(400).json({ error: "Tous les champs sont requis." });
     }
 
+    // Préparation des données
     const productData = {
       nom: req.body.nom,
       description: req.body.description,
@@ -237,30 +250,19 @@ module.exports.addProduct = async (req, res) => {
       images: req.body.images || []
     };
 
-
-    // Ajouter l'image si elle existe
+    // Gestion de l'image uploadée
     if (req.file) {
-      productData.image = req.file.filename;
+      productData.image = req.file.path || req.file.filename;
     }
 
+    // Sauvegarde
     const newProduit = new ProduitsModel(productData);
     const savedProduit = await newProduit.save();
-    
-    // Peupler la catégorie pour la réponse
     await savedProduit.populate('categorie');
     
-    // Ajouter l'URL complète pour l'image (comme dans getAllProduct)
-    const produitObj = savedProduit.toObject();
-    if (produitObj.image) {
-      produitObj.imageUrl = `${req.protocol}://${req.get('host')}/uploads/${produitObj.image}`;
-    }
-    if (produitObj.images && produitObj.images.length > 0) {
-      produitObj.imageUrls = produitObj.images.map(img => 
-        `${req.protocol}://${req.get('host')}/uploads/${img}`
-      );
-    }
-    
-    res.status(201).json(produitObj);
+    // TRAITEMENT D'IMAGE CENTRALISÉ
+    res.status(201).json(addImageUrls(savedProduit, req));
+
   } catch (err) {
     console.error("Erreur lors de l'ajout du produit :", err);
     res.status(500).json({ error: "Erreur serveur, impossible d'ajouter le produit" });
@@ -278,21 +280,18 @@ module.exports.updatedProduct = async (req, res) => {
 
   try {
     const existingProduct = await ProduitsModel.findById(id);
-    
     if (!existingProduct) {
       return res.status(404).json({ error: "Produit non trouvé" });
     }
 
     const updateData = { ...req.body };
 
-
-    // Gestion de l'image
+    // Gestion du remplacement de l'image
     if (req.file) {
-      // Supprimer l'ancienne image si elle existe
       if (existingProduct.image) {
-        deleteFile(existingProduct.image);
+        await deleteFile(existingProduct.image);
       }
-      updateData.image = req.file.filename;
+      updateData.image = req.file.path || req.file.filename;
     }
 
     const updatedProduit = await ProduitsModel.findByIdAndUpdate(
@@ -301,18 +300,9 @@ module.exports.updatedProduct = async (req, res) => {
       { new: true, runValidators: true }
     ).populate('categorie');
 
-    // Ajouter l'URL complète pour l'image (comme dans getAllProduct)
-    const produitObj = updatedProduit.toObject();
-    if (produitObj.image) {
-      produitObj.imageUrl = `${req.protocol}://${req.get('host')}/uploads/${produitObj.image}`;
-    }
-    if (produitObj.images && produitObj.images.length > 0) {
-      produitObj.imageUrls = produitObj.images.map(img => 
-        `${req.protocol}://${req.get('host')}/uploads/${img}`
-      );
-    }
+    // TRAITEMENT D'IMAGE CENTRALISÉ
+    res.status(200).json(addImageUrls(updatedProduit, req));
 
-    res.status(200).json(produitObj);
   } catch (err) {
     console.error("Erreur lors de la mise à jour :", err);
     res.status(500).json({ error: "Erreur serveur, mise à jour impossible" });
@@ -337,14 +327,14 @@ module.exports.deleteProduct = async (req, res) => {
 
     // Supprimer l'image associée
     if (deleteProduit.image) {
-      deleteFile(deleteProduit.image);
+      await deleteFile(deleteProduit.image);
     }
 
     // Supprimer les images multiples s'il y en a
     if (deleteProduit.images && deleteProduit.images.length > 0) {
-      deleteProduit.images.forEach(image => {
-        deleteFile(image);
-      });
+      for (const image of deleteProduit.images) {
+        await deleteFile(image);
+      }
     }
 
     await ProduitsModel.findByIdAndDelete(id);
@@ -357,18 +347,18 @@ module.exports.deleteProduct = async (req, res) => {
 };
 
 
-// Fonction pour upload d'image seule (sans créer de produit)
 module.exports.uploadImage = async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: "Aucune image fournie" });
     }
 
-    const imageUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
+    // Avec Cloudinary, req.file.path contient l'URL complète
+    const imageUrl = req.file.path || `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
     
     res.status(200).json({
       message: "Image uploadée avec succès",
-      filename: req.file.filename,
+      filename: req.file.filename || req.file.path,
       imageUrl: imageUrl
     });
   } catch (err) {

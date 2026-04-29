@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const { uploadWithErrorHandling } = require("../middleware/upload");
-const { resizeProductImage } = require("../middleware/imageResize");
+// const { resizeProductImage } = require("../middleware/imageResize"); // ❌ Désactivé - Cloudinary fait le resize
 const requireAuth = require("../middleware/requireAuth.js");
 const requireAdmin = require("../middleware/requireAdmin.js");
 
@@ -29,11 +29,11 @@ router.get("/category/:categoryId", getProductsByCategory);     // Affichage des
 router.get("/getProduit/:id", getProductById);                  // Affichage d'un produit
 
 // ── Routes admin uniquement ───────────────────────────────────────────────────
-router.get("/statistiques/total-products", requireAuth, requireAdmin, totalProducts);                                       // Nombre total de produits
-router.post("/bulk", requireAuth, requireAdmin, addBulkProducts);                                                           // Ajout en masse
-router.post("/uploadImage", requireAuth, requireAdmin, uploadWithErrorHandling, resizeProductImage, uploadImage);           // Upload d'une image
-router.post("/addProduit", requireAuth, requireAdmin, uploadWithErrorHandling, resizeProductImage, addProduct);             // Ajout d'un produit
-router.put("/updateProduit/:id", requireAuth, requireAdmin, uploadWithErrorHandling, resizeProductImage, updatedProduct);   // Mise à jour d'un produit
-router.delete("/deleteProduit/:id", requireAuth, requireAdmin, deleteProduct);                                              // Suppression d'un produit
+router.get("/statistiques/total-products", requireAuth, requireAdmin, totalProducts);                           // Nombre total de produits
+router.post("/bulk", requireAuth, requireAdmin, addBulkProducts);                                               // Ajout en masse
+router.post("/uploadImage", requireAuth, requireAdmin, uploadWithErrorHandling, uploadImage);                   // Upload d'une image (Cloudinary fait le resize)
+router.post("/addProduit", requireAuth, requireAdmin, uploadWithErrorHandling, addProduct);                     // Ajout d'un produit (Cloudinary fait le resize)
+router.put("/updateProduit/:id", requireAuth, requireAdmin, uploadWithErrorHandling, updatedProduct);           // Mise à jour d'un produit (Cloudinary fait le resize)
+router.delete("/deleteProduit/:id", requireAuth, requireAdmin, deleteProduct);                                  // Suppression d'un produit
 
 module.exports = router;

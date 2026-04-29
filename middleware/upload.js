@@ -1,24 +1,28 @@
 const multer = require('multer');
 const path = require('path');
-const fs = require('fs');
+const cloudinary = require('cloudinary').v2;
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
 
-// Créer le dossier uploads s'il n'existe pas
-const uploadDir = path.join(__dirname, '../uploads');
-if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir, { recursive: true });
-}
+// Configuration Cloudinary
+cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET
+});
 
-
-// Configuration du stockage
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        cb(null, uploadDir);
-    },
-    filename: (req, file, cb) => {
-        // Créer un nom unique pour le fichier
-        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-        const ext = path.extname(file.originalname);
-        cb(null, 'product-' + uniqueSuffix + ext);
+// Configuration du stockage Cloudinary
+const storage = new CloudinaryStorage({
+    cloudinary: cloudinary,
+    params: {
+        folder: 'wayne-enterprize/products',
+        allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'webp'],
+        transformation: [{ width: 350, height: 350, crop: 'fill' }],
+        format: 'jpg',
+        public_id: (req, file) => {
+            // Créer un nom unique pour le fichier
+            const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+            return 'product-' + uniqueSuffix;
+        }
     }
 });
 
@@ -69,11 +73,27 @@ const uploadWithErrorHandling = (req, res, next) => {
 };
 
 
-// Fonction pour supprimer un fichier
-const deleteFile = (filename) => {
-    const filePath = path.join(uploadDir, filename);
-    if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
+// Fonction pour supprimer un fichier de Cloudinary
+const deleteFile = async (filename) => {
+    try {
+        // Extraire le public_id du filename
+        // Format attendu: "product-1234567890-123456789" ou URL Cloudinary complète
+        let publicId = filename;
+        
+        // Si c'est une URL Cloudinary, extraire le public_id
+        if (filename.includes('cloudinary.com')) {
+            const parts = filename.split('/');
+            const fileWithExt = parts[parts.length - 1];
+            const fileWithoutExt = fileWithExt.split('.')[0];
+            publicId = `wayne-enterprize/products/${fileWithoutExt}`;
+        } else if (!filename.includes('/')) {
+            // Si c'est juste le nom du fichier, ajouter le chemin complet
+            publicId = `wayne-enterprize/products/${filename.split('.')[0]}`;
+        }
+        
+        await cloudinary.uploader.destroy(publicId);
+    } catch (error) {
+        console.error('Erreur lors de la suppression de l\'image Cloudinary:', error);
     }
 };
 
