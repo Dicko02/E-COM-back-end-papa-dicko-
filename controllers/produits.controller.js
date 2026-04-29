@@ -1,30 +1,28 @@
-const express = require("express");
-//const router = express.Router();
-const ProduitsModel = require("../models/produitsModel"); // ✅ Correction de l'import
+const ProduitsModel = require("../models/produitsModel");
 const ObjectID = require("mongoose").Types.ObjectId;
 const { deleteFile } = require("../middleware/upload");
 
 
+// --- HELPERS CENTRALISÉS ---
 const getImageUrl = (image, req) => {
   if (!image) return null;
 
-  // CAS 1 : C'est déjà une URL complète (Cloudinary via req.file.path)
+  // CAS 1 : Déjà une URL complète (Cloudinary via req.file.path)
   if (image.startsWith('http')) {
     return image;
   }
 
-  // CAS 2 : C'est un chemin Cloudinary partiel (comme ton produit A.D - 036)
+  // CAS 2 : Chemin Cloudinary partiel (Wayne Enterprize)
   if (image.includes('wayne-enterprize')) {
-    // Remplace 'ton_cloud_name' par ton vrai nom Cloudinary
+    // REMPLACE 'ton_cloud_name' par ton vrai nom Cloudinary
     return `https://res.cloudinary.com/ton_cloud_name/image/upload/${image}`;
   }
 
-  // CAS 3 : C'est un fichier local (comme tes modules Bronze/Gold/Platinum)
+  // CAS 3 : Fichier local (Dossier /uploads/)
   return `${req.protocol}://${req.get('host')}/uploads/${image}`;
 };
 
 const addImageUrls = (produit, req) => {
-  // On transforme le document Mongoose en objet JS simple
   const produitObj = produit.toObject ? produit.toObject() : produit;
   
   if (produitObj.image) {
@@ -39,281 +37,136 @@ const addImageUrls = (produit, req) => {
 };
 
 
-// Fonction pour la récupération de tous les produits
+
+// --- FONCTIONS DU CONTRÔLEUR ---
 module.exports.getAllProduct = async (req, res) => {
   try {
     const produits = await ProduitsModel.find().populate('categorie');
-    
-    // Ajouter l'URL complète pour les images
-    const produitsWithImages = produits.map(produit => {
-      return addImageUrls(produit.toObject(), req);
-    });
-    
+    const produitsWithImages = produits.map(produit => addImageUrls(produit, req));
     res.status(200).json(produitsWithImages);
   } catch (err) {
-    console.error("Erreur lors de la récupération des produits :", err);
-    res.status(500).json({ error: "Erreur serveur, impossible de récupérer les produits" });
+    res.status(500).json({ error: "Erreur serveur" });
   }
 };
 
 
-// Fonction pour la recherche de produits
 module.exports.searchProducts = async (req, res) => {
   try {
-    const { 
-      search = '', 
-      category = '', 
-      minPrice = 0, 
-      maxPrice = Number.MAX_VALUE,
-      sortBy = 'date',
-      sortOrder = 'desc',
-      page = 1,
-      limit = 12
-    } = req.query;
-
-    // Construire la requête de recherche
+    const { search = '', category = '', minPrice = 0, maxPrice = Number.MAX_VALUE, sortBy = 'date', sortOrder = 'desc', page = 1, limit = 12 } = req.query;
     const query = {};
 
-    // Recherche textuelle
     if (search) {
-      query.$or = [
-        { nom: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } }
-      ];
+      query.$or = [{ nom: { $regex: search, $options: 'i' } }, { description: { $regex: search, $options: 'i' } }];
     }
-
-    // Filtre par catégorie
-    if (category) {
-      query.categorie = category;
-    }
-
-    // Filtre par prix
+    if (category) query.categorie = category;
     query.prix = { $gte: parseFloat(minPrice), $lte: parseFloat(maxPrice) };
+    if (req.query.inStock === 'true') query.nombreDisponible = { $gt: 0 };
 
-    // Filtre pour les produits en stock seulement
-    if (req.query.inStock === 'true') {
-      query.nombreDisponible = { $gt: 0 };
-    }
-
-    // Configuration du tri
     const sortOptions = {};
     sortOptions[sortBy] = sortOrder === 'desc' ? -1 : 1;
-
-    // Pagination
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    // Exécuter la requête avec pagination
-    const produits = await ProduitsModel.find(query)
-      .populate('categorie')
-      .sort(sortOptions)
-      .skip(skip)
-      .limit(parseInt(limit));
-
-    // Compter le total pour la pagination
+    const produits = await ProduitsModel.find(query).populate('categorie').sort(sortOptions).skip(skip).limit(parseInt(limit));
     const totalProducts = await ProduitsModel.countDocuments(query);
 
-    // Ajouter l'URL complète pour les images
-    const produitsWithImages = produits.map(produit => {
-      const produitObj = produit.toObject();
-      if (produitObj.image) {
-        produitObj.imageUrl = `${req.protocol}://${req.get('host')}/uploads/${produitObj.image}`;
-      }
-      if (produitObj.images && produitObj.images.length > 0) {
-        produitObj.imageUrls = produitObj.images.map(img => 
-          `${req.protocol}://${req.get('host')}/uploads/${img}`
-        );
-      }
-      return produitObj;
-    });
+    // ✅ Utilisation du helper centralisé ici aussi
+    const productsWithImages = produits.map(produit => addImageUrls(produit, req));
 
     res.status(200).json({
-      products: produitsWithImages,
+      products: productsWithImages,
       pagination: {
         currentPage: parseInt(page),
         totalPages: Math.ceil(totalProducts / parseInt(limit)),
-        totalProducts: totalProducts,
-        hasNextPage: skip + parseInt(limit) < totalProducts,
-        hasPrevPage: parseInt(page) > 1
+        totalProducts: totalProducts
       }
     });
   } catch (err) {
-    console.error("Erreur lors de la recherche des produits :", err);
-    res.status(500).json({ error: "Erreur serveur, impossible de rechercher les produits" });
+    res.status(500).json({ error: "Erreur recherche" });
   }
 };
 
 
-// Fonction pour la récupération des produits par catégorie
 module.exports.getProductsByCategory = async (req, res) => {
   try {
     const { categoryId } = req.params;
-    const { 
-      sortBy = 'date',
-      sortOrder = 'desc',
-      page = 1,
-      limit = 12
-    } = req.query;
+    if (!ObjectID.isValid(categoryId)) return res.status(400).json({ error: "ID invalide" });
 
-    if (!ObjectID.isValid(categoryId)) {
-      return res.status(400).json({ error: "ID de catégorie invalide" });
-    }
+    const produits = await ProduitsModel.find({ categorie: categoryId }).populate('categorie');
+    const produitsWithImages = produits.map(produit => addImageUrls(produit, req));
 
-    // Configuration du tri
-    const sortOptions = {};
-    sortOptions[sortBy] = sortOrder === 'desc' ? -1 : 1;
-
-    // Pagination
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-
-    // Récupérer les produits par catégorie
-    const produits = await ProduitsModel.find({ categorie: categoryId })
-      .populate('categorie')
-      .sort(sortOptions)
-      .skip(skip)
-      .limit(parseInt(limit));
-
-    // Compter le total
-    const totalProducts = await ProduitsModel.countDocuments({ categorie: categoryId });
-
-    // Ajouter l'URL complète pour les images
-    const produitsWithImages = produits.map(produit => {
-      const produitObj = produit.toObject();
-      if (produitObj.image) {
-        produitObj.imageUrl = `${req.protocol}://${req.get('host')}/uploads/${produitObj.image}`;
-      }
-      if (produitObj.images && produitObj.images.length > 0) {
-        produitObj.imageUrls = produitObj.images.map(img => 
-          `${req.protocol}://${req.get('host')}/uploads/${img}`
-        );
-      }
-      return produitObj;
-    });
-
-    res.status(200).json({
-      products: produitsWithImages,
-      pagination: {
-        currentPage: parseInt(page),
-        totalPages: Math.ceil(totalProducts / parseInt(limit)),
-        totalProducts: totalProducts,
-        hasNextPage: skip + parseInt(limit) < totalProducts,
-        hasPrevPage: parseInt(page) > 1
-      }
-    });
+    res.status(200).json({ products: produitsWithImages });
   } catch (err) {
-    console.error("Erreur lors de la récupération des produits par catégorie :", err);
-    res.status(500).json({ error: "Erreur serveur, impossible de récupérer les produits" });
+    res.status(500).json({ error: "Erreur catégorie" });
   }
 };
 
 
-// Fonction pour la récupération d'un produit par ID
 module.exports.getProductById = async (req, res) => {
   const { id } = req.params;
-
-  if (!ObjectID.isValid(id)) {
-    return res.status(400).json({ error: "ID invalide : " + id });
-  }
+  if (!ObjectID.isValid(id)) return res.status(400).json({ error: "ID invalide" });
 
   try {
     const produit = await ProduitsModel.findById(id).populate('categorie');
-    
-    if (!produit) {
-      return res.status(404).json({ error: "Produit non trouvé" });
-    }
+    if (!produit) return res.status(404).json({ error: "Produit non trouvé" });
 
-    const produitObj = produit.toObject();
-    if (produitObj.image) {
-      produitObj.imageUrl = `${req.protocol}://${req.get('host')}/uploads/${produitObj.image}`;
-    }
-    if (produitObj.images && produitObj.images.length > 0) {
-      produitObj.imageUrls = produitObj.images.map(img => 
-        `${req.protocol}://${req.get('host')}/uploads/${img}`
-      );
-    }
-
-    res.status(200).json(produitObj);
+    res.status(200).json(addImageUrls(produit, req));
   } catch (err) {
-    console.error("Erreur lors de la récupération du produit :", err);
-    res.status(500).json({ error: "Erreur serveur, impossible de récupérer le produit" });
+    res.status(500).json({ error: "Erreur produit" });
   }
 };
 
 
-// Fonction pour l'ajout d'un produit
 module.exports.addProduct = async (req, res) => {
   try {
-    // validations
-    if (!req.body.nom || !req.body.description || !req.body.categorie || !req.body.prix || !req.body.nombreDisponible) {
-      return res.status(400).json({ error: "Tous les champs sont requis." });
-    }
+    const productData = { ...req.body };
+    if (req.file) productData.image = req.file.path || req.file.filename;
 
-    // Préparation des données
-    const productData = {
-      nom: req.body.nom,
-      description: req.body.description,
-      categorie: req.body.categorie,
-      prix: req.body.prix,
-      ancienPrix: req.body.ancienPrix || null,
-      nombreDisponible: req.body.nombreDisponible,
-      images: req.body.images || []
-    };
-
-    // Gestion de l'image uploadée
-    if (req.file) {
-      productData.image = req.file.path || req.file.filename;
-    }
-
-    // Sauvegarde
     const newProduit = new ProduitsModel(productData);
     const savedProduit = await newProduit.save();
     await savedProduit.populate('categorie');
     
-    // TRAITEMENT D'IMAGE CENTRALISÉ
     res.status(201).json(addImageUrls(savedProduit, req));
-
   } catch (err) {
-    console.error("Erreur lors de l'ajout du produit :", err);
-    res.status(500).json({ error: "Erreur serveur, impossible d'ajouter le produit" });
+    res.status(500).json({ error: "Erreur ajout" });
   }
 };
 
 
-// Fonction pour la mise à jour d'un produit
 module.exports.updatedProduct = async (req, res) => {
   const { id } = req.params;
-
-  if (!ObjectID.isValid(id)) {
-    return res.status(400).json({ error: "ID invalide : " + id });
-  }
-
   try {
     const existingProduct = await ProduitsModel.findById(id);
-    if (!existingProduct) {
-      return res.status(404).json({ error: "Produit non trouvé" });
-    }
-
     const updateData = { ...req.body };
 
-    // Gestion du remplacement de l'image
     if (req.file) {
-      if (existingProduct.image) {
-        await deleteFile(existingProduct.image);
-      }
+      if (existingProduct.image) await deleteFile(existingProduct.image);
       updateData.image = req.file.path || req.file.filename;
     }
 
-    const updatedProduit = await ProduitsModel.findByIdAndUpdate(
-      id,
-      { $set: updateData },
-      { new: true, runValidators: true }
-    ).populate('categorie');
-
-    // TRAITEMENT D'IMAGE CENTRALISÉ
+    const updatedProduit = await ProduitsModel.findByIdAndUpdate(id, { $set: updateData }, { new: true }).populate('categorie');
     res.status(200).json(addImageUrls(updatedProduit, req));
-
   } catch (err) {
-    console.error("Erreur lors de la mise à jour :", err);
-    res.status(500).json({ error: "Erreur serveur, mise à jour impossible" });
+    res.status(500).json({ error: "Erreur update" });
+  }
+};
+
+
+module.exports.getPopularProducts = async (req, res) => {
+  try {
+    const popularProducts = await ProduitsModel.find().populate('categorie').sort({ nombreDisponible: -1 }).limit(10);
+    res.status(200).json(popularProducts.map(p => addImageUrls(p, req)));
+  } catch (err) {
+    res.status(500).json({ error: "Erreur populaires" });
+  }
+};
+
+
+module.exports.getNewProducts = async (req, res) => {
+  try {
+    const newProducts = await ProduitsModel.find().populate('categorie').sort({ date: -1 }).limit(10);
+    res.status(200).json(newProducts.map(p => addImageUrls(p, req)));
+  } catch (err) {
+    res.status(500).json({ error: "Erreur nouveaux" });
   }
 };
 
@@ -442,66 +295,6 @@ module.exports.addBulkProducts = async (req, res) => {
     res.status(500).json({ 
       error: "Erreur serveur, impossible d'ajouter les produits",
       details: err.message 
-    });
-  }
-};
-
-
-// Fonction pour récupérer les produits populaires
-module.exports.getPopularProducts = async (req, res) => {
-  try {
-    const limit = parseInt(req.query.limit) || 10;
-    
-    // Récupérer les produits triés par stock décroissant (plus populaires)
-    const popularProducts = await ProduitsModel.find()
-      .populate('categorie')
-      .sort({ nombreDisponible: -1 }) // Trier par stock décroissant
-      .limit(limit);
-
-    // Ajouter les URLs des images
-    const productsWithImages = popularProducts.map(product => {
-      const productObj = product.toObject();
-      if (productObj.image) {
-        productObj.imageUrl = `${req.protocol}://${req.get('host')}/uploads/${productObj.image}`;
-      }
-      return productObj;
-    });
-
-    res.status(200).json(productsWithImages);
-  } catch (err) {
-    console.error("Erreur lors de la récupération des produits populaires :", err);
-    res.status(500).json({ 
-      error: "Erreur serveur, impossible de récupérer les produits populaires" 
-    });
-  }
-};
-
-
-// Fonction pour récupérer les nouveaux produits
-module.exports.getNewProducts = async (req, res) => {
-  try {
-    const limit = parseInt(req.query.limit) || 10;
-    
-    // Récupérer les produits triés par date de création décroissante
-    const newProducts = await ProduitsModel.find()
-      .populate('categorie')
-      .sort({ date: -1 }) // Trier par date décroissante
-      .limit(limit);
-
-    // Ajouter les URLs des images
-    const productsWithImages = newProducts.map(product => {
-      const productObj = product.toObject();
-      if (productObj.image) {
-        productObj.imageUrl = `${req.protocol}://${req.get('host')}/uploads/${productObj.image}`;
-      }
-      return productObj;
-    });
-
-    res.status(200).json(productsWithImages);
-  } catch (err) {
-    console.error("Erreur lors de la récupération des nouveaux produits :", err);
-    res.status(500).json({ 
-      error: "Erreur serveur, impossible de récupérer les nouveaux produits" 
     });
   }
 };
