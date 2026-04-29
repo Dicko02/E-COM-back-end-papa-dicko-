@@ -7,11 +7,19 @@ const { deleteFile } = require("../middleware/upload");
 
 const getImageUrl = (image, req) => {
   if (!image) return null;
-  // Si c'est Cloudinary (URL complète ou dossier spécifique)
-  if (image.startsWith('http') || image.includes('wayne-enterprize')) {
-    return image; 
+
+  // CAS 1 : C'est déjà une URL complète (Cloudinary via req.file.path)
+  if (image.startsWith('http')) {
+    return image;
   }
-  // Sinon, c'est du stockage local
+
+  // CAS 2 : C'est un chemin Cloudinary partiel (comme ton produit A.D - 036)
+  if (image.includes('wayne-enterprize')) {
+    // Remplace 'ton_cloud_name' par ton vrai nom Cloudinary
+    return `https://res.cloudinary.com/ton_cloud_name/image/upload/${image}`;
+  }
+
+  // CAS 3 : C'est un fichier local (comme tes modules Bronze/Gold/Platinum)
   return `${req.protocol}://${req.get('host')}/uploads/${image}`;
 };
 
