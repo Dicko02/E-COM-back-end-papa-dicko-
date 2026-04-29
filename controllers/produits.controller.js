@@ -14,8 +14,10 @@ const getImageUrl = (image, req) => {
 
   // CAS 2 : Chemin Cloudinary partiel (Wayne Enterprize)
   if (image.includes('wayne-enterprize')) {
-    // REMPLACE 'ton_cloud_name' par ton vrai nom Cloudinary
-    return `https://res.cloudinary.com/ton_cloud_name/image/upload/${image}`;
+
+    const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+
+    return `https://res.cloudinary.com/${cloudName}/image/upload/${image}`;
   }
 
   // CAS 3 : Fichier local (Dossier /uploads/)
