@@ -47,6 +47,9 @@ app.use(generalLimiter);
 // Réduit la taille des réponses JSON de ~60-70%
 app.use(compression());
 
+// Pour le warning rate-limit
+app.set('trust proxy', 1);
+
 // Importation des routes
 const userRoutes = require("./routes/user.route");
 const produitsRoutes = require('./routes/products.route');

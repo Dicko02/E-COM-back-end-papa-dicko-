@@ -1,29 +1,16 @@
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 
-// Création d'un transporteur
-const transporter = nodemailer.createTransport({
-  service: "gmail", //Utilisation de Gmail
-  auth: {
-    user: process.env.SENDER_MAIL, //Adresse Gmail
-    pass: process.env.SENDER_MAIL_PASSWORD //Mot de passe d'application généré
-  },
-  debug: true,
-  logger: true
-});
+const resend = new Resend(process.env.RESEND_API_KEY);
 
-
-// Fonction pour envoyer un e-mail
-const sendMail = (to, subject, text, html) => {
-    const mailOptions = {
-        from: process.env.SENDER_MAIL,
-        to: to,
-        replyTo: process.env.RECEPTION_MAIL,
-        subject: subject,
-        text: text,
-        html: html
-    };
-
-    return transporter.sendMail(mailOptions);
+const sendMail = async (to, subject, text, html) => {
+  return resend.emails.send({
+    from: 'Wayne Enterprize <onboarding@resend.dev>',
+    to,
+    subject,
+    text,
+    html,
+    replyTo: process.env.RECEPTION_MAIL, // ✅ tu gardes ton replyTo
+  });
 };
 
 module.exports = sendMail;
