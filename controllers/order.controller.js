@@ -220,6 +220,63 @@ module.exports.getOrderById = async (req, res) => {
 };
 
 
+// Fonction pour récupérer toutes les commandes d'une session Wave (multi-produits)
+module.exports.getOrdersByWaveSession = async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    
+    if (!sessionId) {
+      return res.status(400).json({ error: 'Session ID requis' });
+    }
+
+    const orders = await Order.find({ waveSessionId: sessionId })
+      .populate('produitId', 'nom prix imageUrl description');
+    
+    if (!orders || orders.length === 0) {
+      return res.status(404).json({ error: 'Aucune commande trouvée pour cette session' });
+    }
+
+    // SÉCURITÉ : Vérifier que l'utilisateur a le droit de voir ces commandes
+    // Un utilisateur ne peut voir que ses propres commandes (sauf admin)
+    if (req.user.role !== 'admin') {
+      // Vérifier par userId (plus robuste qu'email qui peut changer)
+      const userId = req.user._id.toString();
+      const allBelongToUser = orders.every(
+        order => order.customerInfo?.userId?.toString() === userId
+      );
+      
+      // Fallback sur email si userId n'existe pas (anciennes commandes)
+      if (!allBelongToUser) {
+        const userEmail = req.user.email;
+        const allBelongToUserByEmail = orders.every(
+          order => order.customerEmail === userEmail
+        );
+        
+        if (!allBelongToUserByEmail) {
+          return res.status(403).json({ error: 'Accès refusé - Ces commandes ne vous appartiennent pas' });
+        }
+      }
+    }
+
+    // Calculer le total
+    const totalAmount = orders.reduce((sum, order) => sum + order.totalAmount, 0);
+    
+    res.status(200).json({
+      success: true,
+      orders: orders,
+      totalAmount: totalAmount,
+      orderCount: orders.length,
+      customerEmail: orders[0].customerEmail,
+      paymentStatus: orders[0].paymentStatus,
+      status: orders[0].status
+    });
+  } catch (error) {
+    console.error('Erreur getOrdersByWaveSession:', error);
+    res.status(500).json({ error: 'Erreur serveur lors de la récupération des commandes' });
+  }
+};
+
+
 // Fonction pour la mise à jour du statut d'une commande
 module.exports.updateOrderStatus = async (req, res) => {
   try {

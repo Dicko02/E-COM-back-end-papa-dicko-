@@ -2,26 +2,23 @@ const express = require('express');
 const router = express.Router();
 
 const {
-  createPaymentIntent,
-  confirmPayment,
-  getPaymentStatus,
-  refundPayment,
+  initiateWavePayment,
+  waveWebhook,
+  checkWavePaymentStatus,
   getPaymentStats
 } = require('../controllers/payment.controller');
 
-// Route pour créer une intention de paiement
-router.post('/create-payment-intent', createPaymentIntent);
+// Route pour initier un paiement Wave
+router.post('/wave/initiate', initiateWavePayment);
 
-// Route pour confirmer un paiement
-router.post('/confirm-payment', confirmPayment);
+// Route webhook Wave (appelée par Wave automatiquement)
+// IMPORTANT: express.raw() pour pouvoir vérifier la signature avant parsing JSON
+router.post('/wave/webhook', express.raw({ type: 'application/json' }), waveWebhook);
 
-// Route pour récupérer le statut d'un paiement
-router.get('/status/:paymentIntentId', getPaymentStatus);
-
-// Route pour effectuer un remboursement
-router.post('/refund', refundPayment);
+// Route pour vérifier le statut d'un paiement Wave
+router.get('/wave/status/:sessionId', checkWavePaymentStatus);
 
 // Route pour les statistiques de paiement (admin)
 router.get('/stats', getPaymentStats);
 
-module.exports = router; 
+module.exports = router;

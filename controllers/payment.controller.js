@@ -2,6 +2,7 @@ const Order = require("../models/orderModel");
 const ProduitsModel = require("../models/produitsModel");
 const Chart = require("../models/chart.model");
 const sendConfirmationEmail = require("../utils/orderMailer");
+const waveService = require("../services/wave.service");
 
 // Statuts de paiement
 const PAYMENT_STATUS = {
@@ -11,261 +12,256 @@ const PAYMENT_STATUS = {
   CANCELLED: 'cancelled'
 };
 
-// Méthodes de paiement (uniquement Wave et Orange Money)
+// Méthodes de paiement
 const PAYMENT_METHODS = {
   WAVE: 'wave',
   ORANGE_MONEY: 'orange_money'
 };
 
-// Transactions simulées (mémoire)
-let simulatedTransactions = new Map();
-
-// Générer un ID unique
-const generateTransactionId = () => {
-  return 'txn_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-};
-
-// Création d'une intention de paiement
-module.exports.createPaymentIntent = async (req, res) => {
+/**
+ * Initier un paiement Wave
+ * Crée d'abord les commandes, puis génère la session Wave
+ */
+module.exports.initiateWavePayment = async (req, res) => {
   try {
-    const { amount, currency = 'XOF', paymentMethod, customerPhone, customerEmail } = req.body;
+    const { cartItems, customerInfo, totalAmount } = req.body;
 
-    if (!amount || !paymentMethod || !customerPhone || !customerEmail) {
+    if (!cartItems || !customerInfo || !totalAmount) {
       return res.status(400).json({
-        error: 'Montant, méthode de paiement, téléphone et email client requis'
+        error: 'Articles du panier, informations client et montant total requis'
       });
     }
 
-    if (!Object.values(PAYMENT_METHODS).includes(paymentMethod)) {
-      return res.status(400).json({ error: 'Méthode de paiement non supportée' });
-    }
+    // 1. Créer les commandes en statut "pending" (une commande par produit)
+    const orderPromises = cartItems.map(async (item) => {
+      const produit = await ProduitsModel.findById(item.productId);
 
-    const transactionId = generateTransactionId();
+      if (!produit) throw new Error(`Produit ${item.productId} non trouvé`);
+      if (produit.nombreDisponible < item.quantity) {
+        throw new Error(`Stock insuffisant pour ${produit.nom}`);
+      }
 
-    const paymentIntent = {
-      id: transactionId,
-      amount,
-      currency,
-      status: PAYMENT_STATUS.PENDING,
-      paymentMethod,
-      customerPhone,
-      customerEmail,
-      createdAt: new Date(),
-      clientSecret: `pi_${transactionId}_secret_${Math.random().toString(36).substr(2, 8)}`
-    };
+      const order = new Order({
+        produitId: item.productId,
+        quantity: item.quantity,
+        customerEmail: customerInfo.email,
+        customerPhone: customerInfo.phone,
+        customerInfo: {
+          firstName: customerInfo.firstName,
+          lastName: customerInfo.lastName,
+          email: customerInfo.email,
+          phone: customerInfo.phone,
+          userId: customerInfo.userId
+        },
+        totalAmount: produit.prix * item.quantity,
+        status: "pending",
+        paymentStatus: "pending"
+      });
 
-    simulatedTransactions.set(transactionId, paymentIntent);
+      return order.save();
+    });
+
+    const orders = await Promise.all(orderPromises);
+    const mainOrderId = orders[0]._id.toString();
+
+    // 2. Créer la session de paiement Wave
+    const wavePayment = await waveService.createPayment({
+      amount: totalAmount,
+      currency: 'XOF',
+      customerEmail: customerInfo.email,
+      customerPhone: customerInfo.phone,
+      orderId: mainOrderId,
+      items: cartItems
+    });
+
+    // 3. Mettre à jour les commandes avec le sessionId Wave
+    await Promise.all(
+      orders.map(order => {
+        order.waveSessionId = wavePayment.sessionId;
+        return order.save();
+      })
+    );
 
     res.status(200).json({
       success: true,
-      paymentIntent: {
-        id: paymentIntent.id,
-        clientSecret: paymentIntent.clientSecret,
-        amount: paymentIntent.amount,
-        currency: paymentIntent.currency,
-        status: paymentIntent.status
-      }
+      orderId: mainOrderId,
+      checkoutUrl: wavePayment.checkoutUrl,
+      sessionId: wavePayment.sessionId,
+      expiresAt: wavePayment.expiresAt
     });
 
   } catch (error) {
-    console.error("Erreur lors de la création de l'intention de paiement:", error);
-    res.status(500).json({ error: "Erreur serveur lors de la création du paiement" });
+    console.error("Erreur lors de l'initiation du paiement Wave:", error);
+    res.status(500).json({
+      error: error.message || "Erreur serveur lors de l'initiation du paiement"
+    });
   }
 };
 
-// Confirmation d'un paiement
-module.exports.confirmPayment = async (req, res) => {
+/**
+ * Webhook Wave - Appelé automatiquement par Wave lors d'un changement de statut
+ */
+module.exports.waveWebhook = async (req, res) => {
   try {
-    const { paymentIntentId, cartItems, customerInfo } = req.body;
+    const signature = req.headers['x-wave-signature'];
+    
+    // Pour express.raw(), le body est un Buffer
+    const payload = req.body instanceof Buffer ? req.body.toString() : JSON.stringify(req.body);
 
-    if (!paymentIntentId || !cartItems || !customerInfo) {
-      return res.status(400).json({
-        error: "ID de paiement, articles du panier et informations client requis"
-      });
+    // Vérifier la signature du webhook
+    if (!waveService.verifyWebhookSignature(payload, signature)) {
+      console.error('Signature webhook Wave invalide');
+      return res.status(401).json({ error: 'Signature invalide' });
     }
 
-    const transaction = simulatedTransactions.get(paymentIntentId);
+    // Parser le body si c'est un Buffer
+    const webhookData = req.body instanceof Buffer ? JSON.parse(payload) : req.body;
+    const { type, data } = webhookData;
 
-    if (!transaction) {
-      return res.status(404).json({ error: "Transaction non trouvée" });
-    }
+    // Traiter uniquement les événements de paiement
+    if (type === 'checkout.session.completed' || type === 'checkout.session.failed') {
+      const sessionId = data.id;
+      const paymentStatus = data.payment_status;
 
-    // Simulation simple : 85% succès, 15% échec
-    const random = Math.random();
-    let paymentStatus = random < 0.85 ? PAYMENT_STATUS.COMPLETED : PAYMENT_STATUS.FAILED;
+      // Trouver les commandes associées
+      const orders = await Order.find({ waveSessionId: sessionId });
 
-    transaction.status = paymentStatus;
-    transaction.updatedAt = new Date();
+      if (orders.length === 0) {
+        console.warn(`Aucune commande trouvée pour sessionId: ${sessionId}`);
+        return res.status(404).json({ error: 'Commande non trouvée' });
+      }
 
-    if (paymentStatus === PAYMENT_STATUS.COMPLETED) {
-      try {
-        const orderPromises = cartItems.map(async (item) => {
-          const produit = await ProduitsModel.findById(item.productId);
+      if (paymentStatus === 'succeeded') {
+        // Paiement réussi
+        for (const order of orders) {
+          order.status = 'confirmed';
+          order.paymentStatus = 'completed';
+          order.paymentDate = new Date();
+          await order.save();
 
-          if (!produit) throw new Error(`Produit ${item.productId} non trouvé`);
-          if (produit.nombreDisponible < item.quantity) throw new Error(`Stock insuffisant pour ${produit.nom}`);
+          // Déduire le stock
+          const produit = await ProduitsModel.findById(order.produitId);
+          if (produit) {
+            produit.nombreDisponible -= order.quantity;
+            await produit.save();
+          }
+        }
 
-          const order = new Order({
-            produitId: item.productId,
-            quantity: item.quantity,
-            customerEmail: customerInfo.email,
-            customerPhone: customerInfo.phone,
-            customerInfo,
-            paymentIntentId,
-            totalAmount: produit.prix * item.quantity,
-            status: "confirmed"
-          });
-
-          produit.nombreDisponible -= item.quantity;
-          await produit.save();
-
-          return order.save();
-        });
-
-        const orders = await Promise.all(orderPromises);
-
-        if (customerInfo.userId) {
+        // Vider le panier si userId existe
+        if (orders[0].customerInfo?.userId) {
           await Chart.findOneAndUpdate(
-            { client: customerInfo.userId },
+            { client: orders[0].customerInfo.userId },
             { products: [] }
           );
         }
 
-        const totalAmount = cartItems.reduce((total, item) => {
-          return total + (item.price * item.quantity);
-        }, 0);
-
+        // Envoyer l'email de confirmation
         await sendConfirmationEmail(
-          customerInfo.email,
+          orders[0].customerEmail,
           orders,
-          totalAmount,
-          paymentIntentId
+          orders.reduce((sum, o) => sum + o.totalAmount, 0),
+          sessionId
         );
 
-        res.status(200).json({
-          success: true,
-          paymentStatus,
-          transactionId: paymentIntentId,
-          orders,
-          message: "Paiement confirmé et commandes créées avec succès"
-        });
-
-      } catch (orderError) {
-        console.error("Erreur lors du traitement de la commande:", orderError);
-        transaction.status = "completed_with_errors";
-
-        res.status(500).json({
-          success: false,
-          error: "Paiement réussi mais erreur lors du traitement de la commande",
-          transactionId: paymentIntentId
-        });
+      } else if (paymentStatus === 'failed' || paymentStatus === 'cancelled') {
+        // Paiement échoué ou annulé
+        for (const order of orders) {
+          order.status = 'cancelled';
+          order.paymentStatus = 'failed';
+          await order.save();
+        }
       }
-    } else {
-      res.status(400).json({
-        success: false,
-        paymentStatus,
-        transactionId: paymentIntentId,
-        message: "Le paiement a échoué. Veuillez réessayer."
-      });
     }
+
+    res.status(200).json({ received: true });
+
   } catch (error) {
-    console.error("Erreur lors de la confirmation du paiement:", error);
-    res.status(500).json({ error: "Erreur serveur lors de la confirmation du paiement" });
+    console.error('Erreur webhook Wave:', error);
+    res.status(500).json({ error: 'Erreur serveur webhook' });
   }
 };
 
-// Vérification du statut d’un paiement
-module.exports.getPaymentStatus = async (req, res) => {
+/**
+ * Vérifier le statut d'un paiement Wave
+ */
+module.exports.checkWavePaymentStatus = async (req, res) => {
   try {
-    const { paymentIntentId } = req.params;
-    const transaction = simulatedTransactions.get(paymentIntentId);
+    const { sessionId } = req.params;
 
-    if (!transaction) {
-      return res.status(404).json({ error: "Transaction non trouvée" });
+    if (!sessionId) {
+      return res.status(400).json({ error: 'Session ID requis' });
+    }
+
+    // Vérifier le statut auprès de Wave
+    const waveStatus = await waveService.checkPaymentStatus(sessionId);
+
+    // Récupérer les commandes associées
+    const orders = await Order.find({ waveSessionId: sessionId }).populate('produitId');
+
+    if (orders.length === 0) {
+      return res.status(404).json({ error: 'Commande non trouvée' });
     }
 
     res.status(200).json({
       success: true,
-      transaction: {
-        id: transaction.id,
-        status: transaction.status,
-        amount: transaction.amount,
-        currency: transaction.currency,
-        paymentMethod: transaction.paymentMethod,
-        createdAt: transaction.createdAt,
-        updatedAt: transaction.updatedAt
-      }
+      paymentStatus: waveStatus.status,
+      waveStatus: waveStatus.waveStatus,
+      orders: orders.map(o => ({
+        id: o._id,
+        status: o.status,
+        paymentStatus: o.paymentStatus,
+        totalAmount: o.totalAmount,
+        quantity: o.quantity,
+        product: o.produitId ? {
+          id: o.produitId._id,
+          nom: o.produitId.nom,
+          imageUrl: o.produitId.imageUrl
+        } : null
+      }))
     });
 
   } catch (error) {
-    console.error("Erreur lors de la récupération du statut:", error);
-    res.status(500).json({ error: "Erreur serveur lors de la récupération du statut" });
-  }
-};
-
-// Remboursement d'un paiement
-module.exports.refundPayment = async (req, res) => {
-  try {
-    const { paymentIntentId, amount, reason } = req.body;
-    const transaction = simulatedTransactions.get(paymentIntentId);
-
-    if (!transaction) {
-      return res.status(404).json({ error: "Transaction non trouvée" });
-    }
-
-    if (transaction.status !== PAYMENT_STATUS.COMPLETED) {
-      return res.status(400).json({ error: "Seuls les paiements confirmés peuvent être remboursés" });
-    }
-
-    const refundId = 'ref_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-
-    const refund = {
-      id: refundId,
-      paymentIntentId,
-      amount: amount || transaction.amount,
-      reason: reason || "requested_by_customer",
-      status: "succeeded",
-      createdAt: new Date()
-    };
-
-    if (!transaction.refunds) transaction.refunds = [];
-    transaction.refunds.push(refund);
-
-    res.status(200).json({
-      success: true,
-      refund,
-      message: "Remboursement traité avec succès"
+    console.error("Erreur lors de la vérification du statut Wave:", error);
+    res.status(500).json({
+      error: "Erreur serveur lors de la vérification du statut"
     });
-
-  } catch (error) {
-    console.error("Erreur lors du remboursement:", error);
-    res.status(500).json({ error: "Erreur serveur lors du remboursement" });
   }
 };
 
-// Statistiques admin
+// Statistiques admin (basées sur les vraies commandes)
 module.exports.getPaymentStats = async (req, res) => {
   try {
-    const transactions = Array.from(simulatedTransactions.values());
+    const allOrders = await Order.find({});
 
     const stats = {
-      totalTransactions: transactions.length,
-      completedPayments: transactions.filter(t => t.status === PAYMENT_STATUS.COMPLETED).length,
-      failedPayments: transactions.filter(t => t.status === PAYMENT_STATUS.FAILED).length,
-      cancelledPayments: transactions.filter(t => t.status === PAYMENT_STATUS.CANCELLED).length,
-      totalAmount: transactions
-        .filter(t => t.status === PAYMENT_STATUS.COMPLETED)
-        .reduce((sum, t) => sum + t.amount, 0),
+      totalTransactions: allOrders.length,
+      completedPayments: allOrders.filter(o => o.paymentStatus === 'completed').length,
+      failedPayments: allOrders.filter(o => o.paymentStatus === 'failed').length,
+      cancelledPayments: allOrders.filter(o => o.status === 'cancelled').length,
+      pendingPayments: allOrders.filter(o => o.paymentStatus === 'pending').length,
+      totalAmount: allOrders
+        .filter(o => o.paymentStatus === 'completed')
+        .reduce((sum, o) => sum + o.totalAmount, 0),
       paymentMethods: {
-        wave: transactions.filter(t => t.paymentMethod === PAYMENT_METHODS.WAVE).length,
-        orangeMoney: transactions.filter(t => t.paymentMethod === PAYMENT_METHODS.ORANGE_MONEY).length
+        wave: allOrders.filter(o => o.waveSessionId).length,
+        orangeMoney: 0 // À implémenter plus tard
       }
     };
 
     res.status(200).json({
       success: true,
       stats,
-      recentTransactions: transactions.slice(-10).reverse()
+      recentTransactions: allOrders
+        .sort((a, b) => b.createdAt - a.createdAt)
+        .slice(0, 10)
+        .map(o => ({
+          id: o._id,
+          amount: o.totalAmount,
+          status: o.paymentStatus,
+          orderStatus: o.status,
+          customerEmail: o.customerEmail,
+          createdAt: o.createdAt
+        }))
     });
 
   } catch (error) {

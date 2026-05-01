@@ -23,7 +23,7 @@
 - ✅ 0 vulnérabilité npm audit
 
 ### 🚧 En Cours
-- 🔄 **Wave Payment Integration** — Remplacer paiement simulé par API Wave
+- ✅ **Wave Payment Integration** — Paiements réels via API Wave (implémenté, en attente credentials)
 
 ---
 
@@ -66,6 +66,13 @@ RECEPTION_MAIL=votre-email@gmail.com
 CLOUDINARY_CLOUD_NAME=votre-cloud-name
 CLOUDINARY_API_KEY=votre-api-key
 CLOUDINARY_API_SECRET=votre-api-secret
+
+# Wave Payment (Production)
+WAVE_API_KEY=votre-wave-api-key
+WAVE_API_SECRET=votre-wave-api-secret
+WAVE_WEBHOOK_SECRET=votre-wave-webhook-secret
+WAVE_API_URL=https://api.wave.com/v1
+FRONTEND_URL=http://localhost:5173
 ```
 
 ### Vérification
@@ -348,31 +355,89 @@ Content-Type: application/json
 
 ---
 
-### 💳 Paiement
+### 💳 Paiement Wave
 
-#### Créer une intention de paiement
+#### Initier un paiement Wave
 ```http
-POST /api/payment/create-payment-intent
+POST /api/payment/wave/initiate
 Content-Type: application/json
 
 {
-  "amount": 150,
-  "currency": "XOF",
-  "paymentMethod": "wave",
-  "customerPhone": "221771234567",
-  "customerEmail": "john@example.com"
+  "cartItems": [
+    {
+      "productId": "<product_id>",
+      "quantity": 1,
+      "price": 150
+    }
+  ],
+  "customerInfo": {
+    "userId": "<user_id>",
+    "firstName": "John",
+    "lastName": "Doe",
+    "email": "john@example.com",
+    "phone": "221771234567"
+  },
+  "totalAmount": 150
+}
+
+Response:
+{
+  "success": true,
+  "orderId": "<order_id>",
+  "checkoutUrl": "https://checkout.wave.com/...",
+  "sessionId": "<wave_session_id>",
+  "expiresAt": "2024-01-01T12:00:00Z"
 }
 ```
 
-#### Confirmer un paiement
+#### Webhook Wave (appelé automatiquement par Wave)
 ```http
-POST /api/payment/confirm-payment
+POST /api/payment/wave/webhook
+X-Wave-Signature: <signature>
 Content-Type: application/json
 
 {
-  "paymentIntentId": "<payment_id>",
-  "cartItems": [...],
-  "customerInfo": {...}
+  "type": "checkout.session.completed",
+  "data": {
+    "id": "<session_id>",
+    "payment_status": "succeeded"
+  }
+}
+```
+
+#### Vérifier le statut d'un paiement
+```http
+GET /api/payment/wave/status/:sessionId
+
+Response:
+{
+  "success": true,
+  "paymentStatus": "completed",
+  "waveStatus": "succeeded",
+  "orders": [...]
+}
+```
+
+#### Statistiques paiements (Admin)
+```http
+GET /api/payment/stats
+Authorization: Bearer <token>
+
+Response:
+{
+  "success": true,
+  "stats": {
+    "totalTransactions": 150,
+    "completedPayments": 120,
+    "failedPayments": 20,
+    "pendingPayments": 10,
+    "totalAmount": 45000,
+    "paymentMethods": {
+      "wave": 120,
+      "orangeMoney": 0
+    }
+  },
+  "recentTransactions": [...]
 }
 ```
 

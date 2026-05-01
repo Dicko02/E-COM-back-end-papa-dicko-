@@ -20,7 +20,8 @@ const {
   getCustomerTrends,
   getCategoryStats,
   getTopProducts,
-  getStatusBreakdown
+  getStatusBreakdown,
+  getOrdersByWaveSession
 } = require("../controllers/order.controller");
 
 // ── Routes fixes (doivent être AVANT les routes dynamiques /:id) ──────────────
@@ -33,6 +34,9 @@ router.get('/all', requireAuth, requireAdmin, getAllOrders);
 
 // Commandes d'un utilisateur
 router.get('/user/:email', requireAuth, getUserOrders);
+
+// Commandes par waveSessionId (pour confirmation multi-produits) - PROTÉGÉ
+router.get('/wave/:sessionId', requireAuth, getOrdersByWaveSession);
 
 // 📊 STATISTIQUES — toutes AVANT /:orderId pour éviter les conflits de routing
 router.get('/stats/overview',        requireAuth, requireAdmin, getOrderStats);

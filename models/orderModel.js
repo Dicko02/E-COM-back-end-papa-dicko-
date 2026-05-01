@@ -1,33 +1,26 @@
 const mongoose = require('mongoose');
 
-// Schéma pour les items dans une commande
-const orderItemSchema = new mongoose.Schema({
-  produitId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Produit',
-    required: true
-  },
-  quantity: {
-    type: Number,
-    required: true,
-    min: 1
-  },
-  price: {
-    type: Number,
-    required: true
-  },
-  subtotal: {
-    type: Number,
-    required: true
-  }
-});
-
 const orderSchema = new mongoose.Schema(
   {
-    // Tableau d'items au lieu de produitId simple
-    items: [orderItemSchema],
+    // Produit unique (ancien schéma - compatible avec tout le projet)
+    produitId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Produit',
+      required: true
+    },
+
+    quantity: {
+      type: Number,
+      required: true,
+      min: 1,
+      default: 1
+    },
 
     customerEmail: {
+      type: String,
+    },
+
+    customerPhone: {
       type: String,
     },
 
@@ -36,6 +29,7 @@ const orderSchema = new mongoose.Schema(
       lastName: String,
       email: String,
       phone: String,
+      userId: String,
       address: {
         street: String,
         city: String,
@@ -47,6 +41,15 @@ const orderSchema = new mongoose.Schema(
     paymentIntentId: {
       type: String,
       required: false
+    },
+
+    waveSessionId: {
+      type: String,
+      required: false
+    },
+
+    paymentDate: {
+      type: Date
     },
 
     totalAmount: {
@@ -97,4 +100,3 @@ const orderSchema = new mongoose.Schema(
 const OrderModel = mongoose.model('Order', orderSchema);
 
 module.exports = OrderModel;
-
