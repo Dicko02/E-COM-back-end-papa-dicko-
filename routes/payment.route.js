@@ -1,24 +1,27 @@
 const express = require('express');
-const router = express.Router();
+const router  = express.Router();
 
 const {
-  initiateWavePayment,
-  waveWebhook,
-  checkWavePaymentStatus,
-  getPaymentStats
+  initiatePayment,
+  senePayWebhook,
+  checkPaymentStatus,
+  getPaymentStats,
 } = require('../controllers/payment.controller');
 
-// Route pour initier un paiement Wave
-router.post('/wave/initiate', initiateWavePayment);
+// Initier un paiement SenePay
+router.post('/senepay/initiate', initiatePayment);
 
-// Route webhook Wave (appelée par Wave automatiquement)
-// IMPORTANT: express.raw() pour pouvoir vérifier la signature avant parsing JSON
-router.post('/wave/webhook', express.raw({ type: 'application/json' }), waveWebhook);
+// Webhook SenePay — express.raw() pour vérification de signature sur body brut
+router.post(
+  '/senepay/webhook',
+  express.raw({ type: 'application/json' }),
+  senePayWebhook
+);
 
-// Route pour vérifier le statut d'un paiement Wave
-router.get('/wave/status/:sessionId', checkWavePaymentStatus);
+// Vérifier le statut d'une session
+router.get('/senepay/status/:sessionToken', checkPaymentStatus);
 
-// Route pour les statistiques de paiement (admin)
+// Statistiques admin
 router.get('/stats', getPaymentStats);
 
 module.exports = router;

@@ -13,7 +13,7 @@ const app = express();
 
 dotenv.config();
 require('./config/db_config');
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 5000;
 
 // ── Sécurité : Headers HTTP (Helmet) ─────────────────────────────────────────
 app.use(helmet({
